@@ -545,26 +545,14 @@ function showZonePanel(zoneIdx) {
 }
 
 function closeZonePanel() {
+  if (activeCircle) { map.removeLayer(activeCircle); activeCircle = null; }
   document.getElementById('zonePanel').classList.remove('visible');
   setTimeout(() => map.invalidateSize(), 50);
 }
 
+let activeCircle = null;
 ZONES.forEach((z, i) => {
   const color = zoneColors[i] || '#90CAF9';
-  // 3km radius circles centered on each corridor midpoint
-  if (z.corridors) {
-    z.corridors.forEach(cor => {
-      if (!cor.points || cor.points.length < 2) return;
-      const mid = cor.points[Math.floor(cor.points.length / 2)];
-      const circle = L.circle(mid, {
-        radius: 3000,
-        color: color, weight: 2, dashArray: '6,4',
-        fillColor: color, fillOpacity: 0.08,
-      });
-      circle.on('click', () => showZonePanel(i));
-      zoneLayer.addLayer(circle);
-    });
-  }
   // Zone center label
   if (z.center) {
     const label = L.marker(z.center, {
@@ -586,8 +574,15 @@ ZONES.forEach((z, i) => {
         lineCap: 'round', lineJoin: 'round',
       });
       line.on('click', () => {
+        if (activeCircle) { map.removeLayer(activeCircle); activeCircle = null; }
+        const mid = cor.points[Math.floor(cor.points.length / 2)];
+        activeCircle = L.circle(mid, {
+          radius: 3000,
+          color: color, weight: 2, dashArray: '6,4',
+          fillColor: color, fillOpacity: 0.08,
+        }).addTo(map);
         showZonePanel(i);
-        map.flyToBounds(line.getBounds(), { padding: [40, 40], duration: 0.8 });
+        map.flyToBounds(activeCircle.getBounds(), { padding: [30, 30], duration: 0.8 });
       });
       line.bindTooltip(`${cor.artery}: ${cor.from_street} \u2192 ${cor.to_street}`, { sticky: true });
       zoneLayer.addLayer(line);
