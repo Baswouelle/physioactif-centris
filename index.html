@@ -551,6 +551,15 @@ function closeZonePanel() {
 
 ZONES.forEach((z, i) => {
   const color = zoneColors[i] || '#90CAF9';
+  // Zone polygon (boundary)
+  if (z.boundary && z.boundary.length > 2) {
+    const poly = L.polygon(z.boundary, {
+      color: color, weight: 2, fillColor: color, fillOpacity: 0.12,
+      dashArray: '6,4',
+    });
+    poly.on('click', () => showZonePanel(i));
+    zoneLayer.addLayer(poly);
+  }
   // Zone center label
   if (z.center) {
     const label = L.marker(z.center, {
