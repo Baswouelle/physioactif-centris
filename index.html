@@ -154,7 +154,7 @@
     <span style="font-size:11px;color:#999;" id="clinicCount"></span>
   </label>
   <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-    <input type="checkbox" id="toggleZones">
+    <input type="checkbox" id="toggleZones" checked>
     <span style="font-size:12px;color:#1565C0;font-weight:500;">Zones potentielles</span>
   </label>
 </div>
@@ -493,7 +493,7 @@ document.getElementById('toggleClinics').addEventListener('change', function() {
 
 // ---- Opportunity zones overlay ----
 const zoneColors = ['#1565C0','#1565C0','#2196F3','#2196F3','#42A5F5','#42A5F5','#64B5F6','#64B5F6','#90CAF9','#90CAF9'];
-const zoneLayer = L.layerGroup();
+const zoneLayer = L.layerGroup().addTo(map);
 
 function showZonePanel(zoneIdx) {
   const z = ZONES[zoneIdx];
