@@ -585,14 +585,13 @@ def update_index_html(listings: List[Dict]) -> bool:
         'listings': listings,
     }, ensure_ascii=False)
 
-    # Replace const DATA = {...};
-    new_html = re.sub(
-        r'const DATA = \{.*?\};',
-        f'const DATA = {new_data};',
-        html,
-        count=1,
-        flags=re.DOTALL,
-    )
+    # Replace const DATA = {...}; using string slicing (not re.sub,
+    # which interprets \n in replacement strings as literal newlines)
+    match = re.search(r'const DATA = \{.*?\};', html, flags=re.DOTALL)
+    if not match:
+        logger.error('Could not find const DATA = {...}; in index.html')
+        return False
+    new_html = html[:match.start()] + f'const DATA = {new_data};' + html[match.end():]
 
     # Replace date display
     new_date = datetime.now().strftime('%Y-%m-%d %H:%M')
