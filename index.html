@@ -104,6 +104,7 @@
   .zone-detail .zd-clinic { font-size: 11px; color: #666; margin: 2px 0; }
   .zone-detail .zd-chain { background: #e74c3c; color: #fff; font-size: 9px; padding: 1px 4px; border-radius: 3px; }
 
+  .leaflet-interactive { outline: none !important; }
   .leaflet-popup-content { font-family: -apple-system, sans-serif; }
   .popup-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
   .popup-addr { font-size: 12px; color: #555; margin-bottom: 4px; }
@@ -572,6 +573,7 @@ ZONES.forEach((z, i) => {
       const line = L.polyline(cor.points, {
         color: color, weight: 6, opacity: 0.85,
         lineCap: 'round', lineJoin: 'round',
+        bubblingMouseEvents: false,
       });
       line.on('click', () => {
         if (activeCircle) { map.removeLayer(activeCircle); activeCircle = null; }
@@ -582,7 +584,7 @@ ZONES.forEach((z, i) => {
           fillColor: color, fillOpacity: 0.08,
         }).addTo(map);
         showZonePanel(i);
-        map.flyToBounds(activeCircle.getBounds(), { padding: [30, 30], duration: 0.8 });
+        map.flyToBounds(activeCircle.getBounds(), { padding: [50, 50], maxZoom: 13, duration: 0.8 });
       });
       line.bindTooltip(`${cor.artery}: ${cor.from_street} \u2192 ${cor.to_street}`, { sticky: true });
       zoneLayer.addLayer(line);
