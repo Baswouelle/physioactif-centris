@@ -146,6 +146,11 @@
   <div class="sep"></div>
   <button class="btn-clear" onclick="resetFilters()">R&eacute;initialiser</button>
   <div class="sep"></div>
+  <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+    <input type="checkbox" id="filterNew">
+    <span style="font-size:12px;color:#e63946;font-weight:600;">Nouveaux seulement</span>
+  </label>
+  <div class="sep"></div>
   <button id="btnHidden" class="btn-clear" onclick="toggleShowHidden()" style="display:none;"></button>
   <div class="sep"></div>
   <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
@@ -375,6 +380,9 @@ function renderFavSidebar() {
           ${price ? `<span class="fav-price">${price}</span>` : ''}
           ${sqft ? `<span class="fav-sqft">${sqft}</span>` : ''}
           ${priceSqft ? `<span style="color:#6e6724;">${priceSqft}</span>` : ''}
+          ${l.first_seen && ((Date.now() - new Date(l.first_seen).getTime()) / 86400000) <= 7
+            ? `<span style="background:#e63946;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">NOUVEAU</span>`
+            : ''}
         </div>
         ${l.broker ? `<div style="font-size:11px;color:#999;margin-top:1px;">${l.broker}</div>` : ''}
         ${favData[l.mls_number] ? `<div style="font-size:10px;color:#9ba491;margin-top:2px;">Ajout\u00E9 par ${favData[l.mls_number].user || '?'}</div>` : ''}
@@ -619,6 +627,7 @@ document.getElementById('sqftMin').addEventListener('input', debounce(applyFilte
 document.getElementById('sqftMax').addEventListener('input', debounce(applyFilters, 400));
 document.getElementById('priceMin').addEventListener('input', debounce(applyFilters, 400));
 document.getElementById('priceMax').addEventListener('input', debounce(applyFilters, 400));
+document.getElementById('filterNew').addEventListener('change', applyFilters);
 
 function debounce(fn, ms) {
   let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); };
@@ -632,6 +641,7 @@ function resetFilters() {
   document.getElementById('sqftMax').value = '';
   document.getElementById('priceMin').value = '';
   document.getElementById('priceMax').value = '';
+  document.getElementById('filterNew').checked = false;
   applyFilters();
 }
 
@@ -643,6 +653,7 @@ function applyFilters() {
   const sqftMax = parseInt(document.getElementById('sqftMax').value) || null;
   const priceMin = parseFloat(document.getElementById('priceMin').value) || null;
   const priceMax = parseFloat(document.getElementById('priceMax').value) || null;
+  const onlyNew = document.getElementById('filterNew').checked;
 
   const filtered = allListings.filter(l => {
     if (!showHidden && hiddenMls.has(l.mls_number)) return false;
@@ -657,6 +668,10 @@ function applyFilters() {
     const pv = parseFloat(l.price_value);
     if (priceMin && pv && pv < priceMin) return false;
     if (priceMax && pv && pv > priceMax) return false;
+    if (onlyNew) {
+      const cutoff = Date.now() - 7 * 86400000;
+      if (!l.first_seen || new Date(l.first_seen).getTime() < cutoff) return false;
+    }
     return true;
   });
 
@@ -695,6 +710,8 @@ function popupHtml(l) {
   const txLabel = l.transaction_type === 'lease' ? 'Location' : 'Vente';
   const txColor = l.transaction_type === 'lease' ? '#ddc96a' : '#243522';
   const txFg = l.transaction_type === 'lease' ? '#243522' : '#fff';
+  const isNew = l.first_seen && ((Date.now() - new Date(l.first_seen).getTime()) / 86400000) <= 7;
+  const newBadge = isNew ? `<span style="background:#e63946;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px;">NOUVEAU</span>` : '';
   // Price per sqft
   let priceSqft = '';
   if (l.sqft && l.price_value) {
@@ -709,7 +726,7 @@ function popupHtml(l) {
     <div style="min-width:220px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
         <span style="font-weight:600;font-size:13px;">${l.category || 'Commercial'}</span>
-        <span style="background:${txColor};color:${txFg};padding:1px 8px;border-radius:4px;font-size:11px;font-weight:500;">${txLabel}</span>
+        <span style="display:flex;align-items:center;">${newBadge}<span style="background:${txColor};color:${txFg};padding:1px 8px;border-radius:4px;font-size:11px;font-weight:500;">${txLabel}</span></span>
       </div>
       <div style="font-size:12px;color:#555;margin-bottom:6px;">${l.address || '?'}</div>
       <table style="font-size:12px;border-collapse:collapse;width:100%;">

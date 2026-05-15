@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = Path(__file__).parent
 CACHE_FILE = SCRIPT_DIR / 'commercial_latest.json'
 INDEX_FILE = SCRIPT_DIR / 'index.html'
+NEW_LISTINGS_FILE = SCRIPT_DIR / 'new_listings.json'
 
 BASE_URL = 'https://www.centris.ca'
 API_MARKERS = f'{BASE_URL}/api/property/map/GetMarkers'
@@ -233,6 +234,7 @@ AREAS = {
 SEARCH_AREAS = [
     'boucherville', 'brossard', 'longueuil', 'st-hubert', 'st-lambert',
     'la-prairie', 'candiac', 'st-constant', 'ste-catherine', 'chateauguay',
+    'delson', 'varennes',
 ]
 SELLING_TYPES = ['Rent', 'Sale']
 
@@ -523,12 +525,15 @@ def search_area(session: requests.Session, area_key: str,
                         cached['price_value'] = listing['price_value']
                     if listing.get('price_display'):
                         cached['price_display'] = listing['price_display']
+                    if not cached.get('first_seen'):
+                        cached['first_seen'] = datetime.now().date().isoformat()
                     all_listings.append(cached)
                     cached_count += 1
                 else:
                     listing['area'] = area_key
                     listing['area_label'] = area['label']
                     listing['transaction_type'] = 'lease' if selling_type == 'Rent' else 'sale'
+                    listing['first_seen'] = datetime.now().date().isoformat()
                     fetch_listing_detail(session, listing)
                     api_calls += 1
                     time.sleep(DETAIL_DELAY)
@@ -554,12 +559,15 @@ def search_area(session: requests.Session, area_key: str,
                             cached['price_value'] = listing['price_value']
                         if listing.get('price_display'):
                             cached['price_display'] = listing['price_display']
+                        if not cached.get('first_seen'):
+                            cached['first_seen'] = datetime.now().date().isoformat()
                         all_listings.append(cached)
                         cached_count += 1
                     else:
                         listing['area'] = area_key
                         listing['area_label'] = area['label']
                         listing['transaction_type'] = 'lease' if selling_type == 'Rent' else 'sale'
+                        listing['first_seen'] = datetime.now().date().isoformat()
                         fetch_listing_detail(session, listing)
                         api_calls += 1
                         time.sleep(DETAIL_DELAY)
@@ -674,6 +682,20 @@ def main():
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
     logger.info(f'Saved: {CACHE_FILE}')
+
+    # Write new_listings.json for email step (only listings not in prior cache)
+    new_listings = [lst for lst in all_listings if lst['mls_number'] not in cache_lookup]
+    if new_listings:
+        with open(NEW_LISTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'search_date': datetime.now().isoformat(),
+                'count': len(new_listings),
+                'listings': new_listings,
+            }, f, ensure_ascii=False, indent=2)
+        logger.info(f'Saved: {NEW_LISTINGS_FILE} ({len(new_listings)} new listings)')
+    elif NEW_LISTINGS_FILE.exists():
+        NEW_LISTINGS_FILE.unlink()
+        logger.info(f'Removed stale {NEW_LISTINGS_FILE} (no new listings)')
 
     # Update index.html
     update_index_html(all_listings)
