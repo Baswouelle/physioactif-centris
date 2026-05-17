@@ -48,6 +48,11 @@ DETAIL_DELAY = 0.5
 
 COMMERCIAL_CATEGORIES = {'batisse commerciale', 'local commercial', 'commerce'}
 
+# Areas where Montréal (Île) listings are wanted. Any Montréal (Île) listing
+# coming from another area is cross-river spillover (Vieux-Montréal listings
+# captured by the longueuil bounding box that crosses the St. Lawrence).
+MONTREAL_OK_AREAS = {'ahuntsic', 'montreal'}
+
 HEADERS = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -578,6 +583,18 @@ def search_area(session: requests.Session, area_key: str,
     return all_listings, new_count, cached_count, api_calls
 
 
+def is_cross_river_spillover(listing: Dict) -> bool:
+    """Drop Montréal (Île) listings unless they came from a Montréal-targeted area.
+
+    The longueuil bounding box crosses the St. Lawrence and captures listings
+    in Vieux-Montréal (Ville-Marie). Centris tags those with city='Montréal (Île)'.
+    They pollute the Rive-Sud-focused output.
+    """
+    city = (listing.get('city') or '').strip()
+    area = (listing.get('area') or '').strip()
+    return city == 'Montréal (Île)' and area not in MONTREAL_OK_AREAS
+
+
 def update_index_html(listings: List[Dict]) -> bool:
     """Update index.html by replacing only the DATA variable and date."""
     if not INDEX_FILE.exists():
@@ -662,6 +679,13 @@ def main():
             total_new += new_count
             total_cached += cached_count
             total_api_calls += calls
+
+    # Drop cross-river Montréal spillover from longueuil bbox
+    before_filter = len(all_listings)
+    all_listings = [l for l in all_listings if not is_cross_river_spillover(l)]
+    spillover_dropped = before_filter - len(all_listings)
+    if spillover_dropped:
+        logger.info(f'Filtered {spillover_dropped} Montréal (Île) cross-river spillover listings')
 
     # Identify delisted
     cached_mls = set(cache_lookup.keys())
