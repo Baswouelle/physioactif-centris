@@ -162,6 +162,12 @@
     <input type="checkbox" id="toggleZones" checked>
     <span style="font-size:12px;color:#1565C0;font-weight:500;">Zones potentielles</span>
   </label>
+  <div class="sep"></div>
+  <span style="font-size:11px;color:#666;display:flex;align-items:center;gap:6px;">
+    <span style="color:#e63946;">&#9679;</span> Nouveau &le;7j
+    <span style="color:#ddc96a;">&#9679;</span> Location
+    <span style="color:#243522;">&#9679;</span> Vente
+  </span>
 </div>
 
 <div class="main">
@@ -210,6 +216,37 @@ function makeIcon(color) {
 }
 const iconLease = makeIcon('#ddc96a');
 const iconSale = makeIcon('#243522');
+const iconNew = makeIcon('#e63946');
+
+function hasNotes(mls) {
+  const n = notesData[mls];
+  return n && Object.keys(n).length > 0;
+}
+
+function isNewUnreviewed(l) {
+  if (!l || !l.first_seen) return false;
+  const ageDays = (Date.now() - new Date(l.first_seen).getTime()) / 86400000;
+  if (ageDays > 7) return false;
+  const mls = l.mls_number;
+  if (favMls.has(mls)) return false;
+  if (hasNotes(mls)) return false;
+  if (hiddenMls.has(mls)) return false;
+  return true;
+}
+
+function expectedIcon(l) {
+  if (isNewUnreviewed(l)) return iconNew;
+  return l.transaction_type === 'sale' ? iconSale : iconLease;
+}
+
+function refreshMarkerIcons() {
+  markers.forEach(m => {
+    const listing = allListings.find(l => l.mls_number === m._listingMls);
+    if (!listing) return;
+    const want = expectedIcon(listing);
+    if (m.options.icon !== want) m.setIcon(want);
+  });
+}
 
 // Clinic markers (separate layer)
 const clinicLayerPA = L.layerGroup().addTo(map);
@@ -290,6 +327,7 @@ favRef.on('value', snap => {
   favData = snap.val() || {};
   favMls = new Set(Object.keys(favData));
   renderFavSidebar();
+  refreshMarkerIcons();
   // Refresh any open popup
   markers.forEach(m => {
     if (m.isPopupOpen()) {
@@ -305,6 +343,7 @@ let notesData = {};  // { mls: [{ user, text, ts }, ...] }
 
 notesRef.on('value', snap => {
   notesData = snap.val() || {};
+  refreshMarkerIcons();
   // Refresh any open popup
   markers.forEach(m => {
     if (m.isPopupOpen()) {
@@ -380,7 +419,7 @@ function renderFavSidebar() {
           ${price ? `<span class="fav-price">${price}</span>` : ''}
           ${sqft ? `<span class="fav-sqft">${sqft}</span>` : ''}
           ${priceSqft ? `<span style="color:#6e6724;">${priceSqft}</span>` : ''}
-          ${l.first_seen && ((Date.now() - new Date(l.first_seen).getTime()) / 86400000) <= 7
+          ${isNewUnreviewed(l)
             ? `<span style="background:#e63946;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">NOUVEAU</span>`
             : ''}
         </div>
@@ -688,7 +727,7 @@ function renderMap(listings) {
   const bounds = [];
   listings.forEach(l => {
     if (!l.latitude || !l.longitude) return;
-    const icon = l.transaction_type === 'sale' ? iconSale : iconLease;
+    const icon = expectedIcon(l);
     const m = L.marker([l.latitude, l.longitude], { icon })
       .addTo(map)
       .bindPopup(popupHtml(l), { maxWidth: 300 });
@@ -710,7 +749,7 @@ function popupHtml(l) {
   const txLabel = l.transaction_type === 'lease' ? 'Location' : 'Vente';
   const txColor = l.transaction_type === 'lease' ? '#ddc96a' : '#243522';
   const txFg = l.transaction_type === 'lease' ? '#243522' : '#fff';
-  const isNew = l.first_seen && ((Date.now() - new Date(l.first_seen).getTime()) / 86400000) <= 7;
+  const isNew = isNewUnreviewed(l);
   const newBadge = isNew ? `<span style="background:#e63946;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px;">NOUVEAU</span>` : '';
   // Price per sqft
   let priceSqft = '';
