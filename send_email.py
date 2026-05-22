@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -73,17 +74,39 @@ def fmt_sqft(listing: dict) -> str:
     return '-'
 
 
-def build_html(new_listings: list, search_date: str) -> str:
-    date_str = search_date[:10] if search_date else datetime.now().date().isoformat()
+def map_link(listing: dict) -> str:
+    """Deep-link to the listing's fiche on our own map (not Centris).
+    index.html reads ?mls=<NoMls> and opens that marker's popup."""
+    mls = listing.get('mls_number') or ''
+    return f"{MAP_URL}?mls={mls}" if mls else MAP_URL
 
-    rows = []
-    for l in new_listings:
-        addr = l.get('address') or l.get('title') or '?'
-        city = l.get('area_label') or l.get('city') or ''
-        cat = l.get('category') or 'Commercial'
-        tx = 'Location' if l.get('transaction_type') == 'lease' else 'Vente'
-        url = l.get('listing_url') or '#'
-        rows.append(f"""
+
+def split_addr(addr: str) -> tuple:
+    """Split a Centris address into (building_label, suite_label).
+
+    Address shape: 'Montérégie, 365, Rue Saint-Jean, local 102'
+      -> building '365, Rue Saint-Jean', suite 'local 102'
+    Drops the leading region/city token and the trailing 'local ...' suffix.
+    """
+    parts = [p.strip() for p in (addr or '').split(',') if p.strip()]
+    suite = ''
+    if parts and re.match(r'(?i)^local\b', parts[-1]):
+        suite = parts[-1]
+        parts = parts[:-1]
+    # Drop a leading non-numeric token (region/city like 'Montérégie')
+    if len(parts) > 1 and not re.search(r'\d', parts[0]):
+        parts = parts[1:]
+    building = ', '.join(parts) if parts else (addr or '?')
+    return building, suite
+
+
+def fresh_row(l: dict) -> str:
+    addr = l.get('address') or l.get('title') or '?'
+    city = l.get('area_label') or l.get('city') or ''
+    cat = l.get('category') or 'Commercial'
+    tx = 'Location' if l.get('transaction_type') == 'lease' else 'Vente'
+    url = map_link(l)
+    return f"""
             <tr>
               <td style="padding:8px 12px;border-bottom:1px solid #e8efec;font-family:monospace;font-size:12px;">{l.get('mls_number', '')}</td>
               <td style="padding:8px 12px;border-bottom:1px solid #e8efec;">
@@ -96,26 +119,87 @@ def build_html(new_listings: list, search_date: str) -> str:
               </td>
               <td style="padding:8px 12px;border-bottom:1px solid #e8efec;font-weight:600;color:#243522;">{fmt_price(l)}</td>
               <td style="padding:8px 12px;border-bottom:1px solid #e8efec;color:#6e6724;">{fmt_sqft(l)}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #e8efec;"><a href="{url}" style="color:#243522;text-decoration:underline;">Voir &rarr;</a></td>
+              <td style="padding:8px 12px;border-bottom:1px solid #e8efec;"><a href="{url}" style="color:#243522;text-decoration:underline;">Carte &rarr;</a></td>
             </tr>
-        """)
+        """
 
-    rows_html = ''.join(rows)
-    n = len(new_listings)
-    plural = 's' if n > 1 else ''
 
-    return f"""<!DOCTYPE html>
-<html lang="fr">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#e8efec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:760px;margin:0 auto;background:#fff;">
-    <div style="background:#243522;color:#ddc96a;padding:20px 24px;">
-      <div style="font-size:20px;font-weight:600;">Physioactif &ndash; Veille Centris</div>
-      <div style="font-size:13px;color:#9ba491;margin-top:4px;">{date_str} &middot; {n} nouveau{plural} local{plural} commercial{plural}</div>
-    </div>
-    <div style="padding:20px 24px;">
+def build_known_section(known: list) -> str:
+    """Compact, grouped-by-building section for new suites in buildings we already
+    track. Demoted below the genuinely new buildings."""
+    if not known:
+        return ''
+
+    groups: dict = {}
+    order: list = []
+    for l in known:
+        building, suite = split_addr(l.get('address'))
+        key = building.lower()
+        if key not in groups:
+            groups[key] = {'building': building,
+                           'city': l.get('area_label') or l.get('city') or '',
+                           'items': []}
+            order.append(key)
+        groups[key]['items'].append((suite, l))
+
+    blocks = []
+    for key in order:
+        g = groups[key]
+        suites = []
+        for suite, l in g['items']:
+            tx = 'Location' if l.get('transaction_type') == 'lease' else 'Vente'
+            url = map_link(l)
+            label = (suite[:1].upper() + suite[1:]) if suite else f"MLS {l.get('mls_number', '')}"
+            bits = [b for b in (fmt_sqft(l) if l.get('sqft') else '',
+                                fmt_price(l) if (l.get('price_display') or l.get('price_value')) else '',
+                                tx) if b]
+            suites.append(
+                f'<li style="margin:2px 0;font-size:12px;color:#3a4a38;">'
+                f'<strong style="color:#243522;">{label}</strong>'
+                f'<span style="color:#6e6724;"> &middot; {" &middot; ".join(bits)}</span>'
+                f' &middot; <a href="{url}" style="color:#243522;">Voir sur la carte &rarr;</a></li>'
+            )
+        blocks.append(
+            f'<div style="margin:0 0 12px 0;padding:10px 12px;background:#f4f7f5;border-radius:8px;">'
+            f'<div style="font-weight:600;color:#243522;font-size:13px;">{g["building"]}'
+            f'<span style="font-weight:400;color:#9ba491;font-size:11px;"> &middot; {g["city"]}</span></div>'
+            f'<ul style="margin:6px 0 0 0;padding-left:18px;">{"".join(suites)}</ul>'
+            f'</div>'
+        )
+
+    n_loc = len(known)
+    n_imm = len(order)
+    return f"""
+      <div style="margin-top:28px;border-top:2px solid #e8efec;padding-top:18px;">
+        <div style="font-size:14px;font-weight:600;color:#6e6724;margin:0 0 4px 0;">
+          Nouveaux locaux dans des immeubles d&eacute;j&agrave; suivis
+        </div>
+        <p style="font-size:12px;color:#9ba491;margin:0 0 14px 0;">
+          {n_loc} {'locaux' if n_loc > 1 else 'local'} dans {n_imm} immeuble{'s' if n_imm > 1 else ''} d&eacute;j&agrave; pr&eacute;sent{'s' if n_imm > 1 else ''} dans la liste (souvent une autre suite, ou une refonte de fiche par le courtier).
+        </p>
+        {''.join(blocks)}
+      </div>"""
+
+
+def immeuble_phrase(n: int) -> str:
+    """French-correct: 'nouvel immeuble' (sing.), 'nouveaux immeubles' (plur.)."""
+    return f"{n} nouvel immeuble" if n <= 1 else f"{n} nouveaux immeubles"
+
+
+def build_html(new_listings: list, search_date: str) -> str:
+    date_str = search_date[:10] if search_date else datetime.now().date().isoformat()
+
+    fresh = [l for l in new_listings if not l.get('building_seen_before')]
+    known = [l for l in new_listings if l.get('building_seen_before')]
+
+    nf = len(fresh)
+    plural = 's' if nf > 1 else ''
+
+    if fresh:
+        rows_html = ''.join(fresh_row(l) for l in fresh)
+        fresh_block = f"""
       <p style="font-size:14px;color:#243522;margin:0 0 16px 0;">
-        {n} nouveau{plural} listing{plural} apparu{plural} sur Centris depuis le dernier scan&nbsp;:
+        {immeuble_phrase(nf)} apparu{plural} sur Centris depuis le dernier scan&nbsp;:
       </p>
       <table style="width:100%;border-collapse:collapse;font-size:13px;color:#243522;">
         <thead>
@@ -129,7 +213,27 @@ def build_html(new_listings: list, search_date: str) -> str:
           </tr>
         </thead>
         <tbody>{rows_html}</tbody>
-      </table>
+      </table>"""
+    else:
+        fresh_block = """
+      <p style="font-size:14px;color:#243522;margin:0 0 16px 0;">
+        Aucun nouvel immeuble jamais vu aujourd&apos;hui. Seulement de nouveaux locaux dans des immeubles d&eacute;j&agrave; suivis&nbsp;:
+      </p>"""
+
+    known_block = build_known_section(known)
+
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#e8efec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:760px;margin:0 auto;background:#fff;">
+    <div style="background:#243522;color:#ddc96a;padding:20px 24px;">
+      <div style="font-size:20px;font-weight:600;">Physioactif &ndash; Veille Centris</div>
+      <div style="font-size:13px;color:#9ba491;margin-top:4px;">{date_str} &middot; {immeuble_phrase(nf)}{f' &middot; {len(known)} {"locaux" if len(known) > 1 else "local"} d&eacute;j&agrave; suivi{"s" if len(known) > 1 else ""}' if known else ''}</div>
+    </div>
+    <div style="padding:20px 24px;">
+      {fresh_block}
+      {known_block}
       <p style="margin:20px 0 0 0;font-size:13px;">
         <a href="{MAP_URL}" style="display:inline-block;background:#ddc96a;color:#243522;padding:10px 20px;border-radius:50px;text-decoration:none;font-weight:600;">Ouvrir la carte interactive &rarr;</a>
       </p>
@@ -174,9 +278,13 @@ def main() -> int:
         logger.info('new_listings.json is empty - nothing to send')
         return 0
 
-    n = len(new_listings)
+    nf = sum(1 for l in new_listings if not l.get('building_seen_before'))
+    nk = len(new_listings) - nf
     date_str = (data.get('search_date') or datetime.now().isoformat())[:10]
-    subject = f"Centris: {n} nouveau{'x' if n > 1 else ''} local{'aux' if n > 1 else ''} commercial{'aux' if n > 1 else ''} - {date_str}"
+    head = f"{nf} nouvel immeuble" if nf <= 1 else f"{nf} nouveaux immeubles"
+    if nk:
+        head += f" (+{nk} {'locaux' if nk > 1 else 'local'} déjà suivi{'s' if nk > 1 else ''})"
+    subject = f"Centris: {head} - {date_str}"
 
     access_token = get_access_token()
     html_body = build_html(new_listings, data.get('search_date', ''))

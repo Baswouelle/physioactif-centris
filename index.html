@@ -460,6 +460,32 @@ function focusFav(mls) {
   }
 }
 
+// Deep-link: ?mls=<NoMls> opens that listing's fiche (used by the email alert).
+// Always lands on the fiche: un-hides it and clears filters if it was hidden/filtered.
+function openFromUrl() {
+  const target = new URLSearchParams(location.search).get('mls');
+  if (!target) return;
+  if (hiddenMls.has(target)) {
+    hiddenMls.delete(target);
+    localStorage.setItem(LS_KEY, JSON.stringify([...hiddenMls]));
+    updateHiddenBtn();
+    applyFilters();
+  }
+  // Defer so the initial fitBounds/layout has settled; animate:false makes the
+  // jump deterministic (an animated setView gets clobbered by fitBounds at load).
+  setTimeout(() => {
+    let marker = markers.find(m => m._listingMls === target);
+    if (!marker) {          // filtered out -> reset filters and retry
+      resetFilters();
+      marker = markers.find(m => m._listingMls === target);
+    }
+    if (marker) {
+      map.setView(marker.getLatLng(), 16, { animate: false });
+      marker.openPopup();
+    }
+  }, 300);
+}
+
 // ---- Init from embedded data ----
 allListings = DATA.listings || [];
 document.getElementById('stats').textContent =
@@ -806,6 +832,9 @@ function popupHtml(l) {
     </div>
   `;
 }
+
+// Open a specific fiche if the URL carries ?mls=... (email alert deep-link)
+openFromUrl();
 
 </script>
 </body>

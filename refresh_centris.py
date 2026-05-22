@@ -583,6 +583,21 @@ def search_area(session: requests.Session, area_key: str,
     return all_listings, new_count, cached_count, api_calls
 
 
+def building_key(address: Optional[str]) -> Optional[str]:
+    """Normalize an address down to its building (street, civic number), dropping
+    the suite/local. Returns None for placeholder/empty addresses, which must never
+    be treated as 'already seen' (e.g. 'Rue Non Disponible-Unavailable' would
+    collapse unrelated listings into one fake building).
+    """
+    a = (address or '').strip()
+    low = a.lower()
+    if not a or 'non disponible' in low or 'unavailable' in low:
+        return None
+    key = re.sub(r',?\s*local\s+[\w/.\-]+\s*$', '', a, flags=re.IGNORECASE)
+    key = re.sub(r'[\s\xa0]+', ' ', key).strip().lower()
+    return key or None
+
+
 def is_cross_river_spillover(listing: Dict) -> bool:
     """Drop Montréal (Île) listings unless they came from a Montréal-targeted area.
 
@@ -707,16 +722,40 @@ def main():
         json.dump(output, f, ensure_ascii=False, indent=2)
     logger.info(f'Saved: {CACHE_FILE}')
 
-    # Write new_listings.json for email step (only listings not in prior cache)
-    new_listings = [lst for lst in all_listings if lst['mls_number'] not in cache_lookup]
+    # Write new_listings.json for email step (only listings not in prior cache).
+    # Tag each with building_seen_before: was this building's street address already
+    # in the prior cache? Brokers re-list (new MLS, often a different suite) in
+    # buildings we already track; the email demotes those to a "deja suivi" section
+    # instead of headlining them as brand-new (see send_email.build_html).
+    prior_buildings = set()
+    for lst in cache_lookup.values():
+        bk = building_key(lst.get('address'))
+        if bk:
+            prior_buildings.add(bk)
+
+    new_listings = []
+    for lst in all_listings:
+        if lst['mls_number'] in cache_lookup:
+            continue
+        bk = building_key(lst.get('address'))
+        entry = dict(lst)  # copy so the cache/index.html stay free of this flag
+        entry['building_seen_before'] = bool(bk and bk in prior_buildings)
+        new_listings.append(entry)
+
+    fresh_n = sum(1 for l in new_listings if not l['building_seen_before'])
+    known_n = len(new_listings) - fresh_n
     if new_listings:
         with open(NEW_LISTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump({
                 'search_date': datetime.now().isoformat(),
                 'count': len(new_listings),
+                'fresh_buildings': fresh_n,
+                'seen_buildings': known_n,
                 'listings': new_listings,
             }, f, ensure_ascii=False, indent=2)
-        logger.info(f'Saved: {NEW_LISTINGS_FILE} ({len(new_listings)} new listings)')
+        logger.info(f'Saved: {NEW_LISTINGS_FILE} '
+                    f'({len(new_listings)} new: {fresh_n} nouveaux immeubles, '
+                    f'{known_n} locaux dans immeubles deja suivis)')
     elif NEW_LISTINGS_FILE.exists():
         NEW_LISTINGS_FILE.unlink()
         logger.info(f'Removed stale {NEW_LISTINGS_FILE} (no new listings)')
