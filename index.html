@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
@@ -302,7 +303,7 @@ function updateHiddenBtn() {
 
 // --- Firebase init ---
 firebase.initializeApp({
-  apiKey: "AIzaSyBY7WOzyp9ajYA2SttAtWTow2aEdYOm7w0",
+  apiKey: "AIzaSyAudP_DW5xTa7AsLfdNzDitWZOYhT05L4s",
   authDomain: "physioactif-centris.firebaseapp.com",
   databaseURL: "https://physioactif-centris-default-rtdb.firebaseio.com",
   projectId: "physioactif-centris",
@@ -310,6 +311,19 @@ firebase.initializeApp({
 });
 const db = firebase.database();
 const favRef = db.ref('favorites');
+
+// --- Anonymous auth (required by DB security rules: auth != null) ---
+// Silent: no login UI for users. Realtime listeners attach once the
+// anonymous session is ready so reads aren't rejected before sign-in completes.
+let _rtListenersAttached = false;
+function attachRealtimeListeners() {
+  if (_rtListenersAttached) return;
+  _rtListenersAttached = true;
+  attachFavListener();
+  attachNotesListener();
+}
+firebase.auth().onAuthStateChanged(function(user) { if (user) attachRealtimeListeners(); });
+firebase.auth().signInAnonymously().catch(function(e) { console.error('Firebase anonymous auth failed:', e); });
 
 // --- User identity (simple, localStorage) ---
 const USER_KEY = 'centris_user_name';
@@ -323,6 +337,7 @@ if (!userName) {
 let favData = {};  // { mls: { user: "name", ts: timestamp } }
 let favMls = new Set();
 
+function attachFavListener() {
 favRef.on('value', snap => {
   favData = snap.val() || {};
   favMls = new Set(Object.keys(favData));
@@ -336,11 +351,13 @@ favRef.on('value', snap => {
     }
   });
 });
+}
 
 // --- Notes (Firebase realtime sync) ---
 const notesRef = db.ref('notes');
 let notesData = {};  // { mls: [{ user, text, ts }, ...] }
 
+function attachNotesListener() {
 notesRef.on('value', snap => {
   notesData = snap.val() || {};
   refreshMarkerIcons();
@@ -353,6 +370,7 @@ notesRef.on('value', snap => {
   });
   renderFavSidebar();
 });
+}
 
 function addNote(mls) {
   const input = document.getElementById('note-input-' + mls);
